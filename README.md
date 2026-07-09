@@ -243,6 +243,30 @@ app_key_taskEntry -> app_key_scan -> app_key_report_release -> app_key_send_even
 
 注意: 这些数值是 Keil 静态分析能看到的路径。报告顶部仍然带有 `Unknown(Functions without stacksize, Cycles, Untraceable Function Pointers)`，所以后续如果新增大局部数组、递归、复杂 `printf` 或不可追踪函数指针，应重新生成 `Objects/chezai.htm` 再评估栈大小。
 
+## 动态栈深查看
+
+`RTE/CMSIS/RTX_Conf_CM.c` 中已打开栈水印:
+
+```c
+#define OS_STKINIT      1
+```
+
+进入 Keil Debug 后，打开 `Debug -> OS Support -> RTX Tasks and System`，查看 `Stack Usage` 的 `max` 值。
+
+![Keil RTX Stack Usage](docs/images/keil-rtx-stack-usage.png)
+
+本次截图中的动态最大值:
+
+| 线程 | 动态最大栈用量 |
+| --- | ---: |
+| `osTimerThread` | 80 / 512 bytes |
+| `app_key_taskEntry` | 120 / 512 bytes |
+| `app_power_taskEntry` | 88 / 512 bytes |
+| `app_cd_taskEntry` | 88 / 768 bytes |
+| `app_oled_taskEntry` | 184 / 768 bytes |
+
+结论: 当前栈配置比较宽。若完整跑过所有按键、定时器和 OLED 场景后数值仍接近本表，KEY / POWER 可考虑降到 384 bytes，OLED / CD 可继续保守保留 768 bytes，或再结合后续功能压缩。
+
 ## 构建方法
 
 1. 安装 Keil MDK 5，并确保包含 STM32F1 设备包和 ARM Compiler 5。
