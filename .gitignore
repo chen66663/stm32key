@@ -1,0 +1,33 @@
+# Build outputs
+Objects/
+Listings/
+*.axf
+*.bin
+*.elf
+*.hex
+*.map
+*.o
+*.d
+*.crf
+*.htm
+*.lnp
+
+# Keil/uVision user and generated files
+*.uvguix.*
+*.uvgui.*
+*.uvopt
+*.bak
+*.dep
+Target *.BAT
+
+# Local editor state
+.vscode/
+.vscode/.browse.c_cpp.db*
+.vscode/ipch/
+.vscode/*.log
+.vscode/*.lock
+
+# Local helper/tool cache
+.embeddedskills/
+skill/
+.write_config.py
