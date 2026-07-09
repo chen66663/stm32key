@@ -221,6 +221,10 @@ app_key_taskEntry -> app_key_scan -> app_key_report_release -> app_key_send_even
 -> app_msg_send -> osMessagePut -> isrMessagePut -> isr_mbx_send -> rt_psq_enq
 ```
 
+![Keil Static Stack Analysis](docs/images/keil-static-stack-analysis.png)
+
+`Maximum Stack Usage` 是静态分析结果，`Unknown` 表示仍有启动库、循环或函数指针等路径无法完全计算。
+
 业务线程的静态最大栈深如下:
 
 | 线程入口 | 配置栈 | Keil 静态最大深度 | 报告位置 | 最大调用链摘要 |
