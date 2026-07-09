@@ -178,6 +178,71 @@ RTX 配置在 `RTE/CMSIS/RTX_Conf_CM.c`，关键项如下:
 - 本工程四个线程实际申请的栈总量是 `512 + 512 + 768 + 768 = 2560 bytes`，换算为 `640 words`，小于 `OS_PRIVSTKSIZE` 的 `768 words`，还剩 `128 words = 512 bytes` 余量。
 - `OS_STKCHECK = 1`: RTX 在线程切换时启用栈溢出检查。后续如果在 KEY 任务里新增较大的局部数组、递归调用或复杂打印，应重新评估 `TASK_KEY_STACK_SIZE`。
 
+## RTX5 到 RTX v1 迁移记录
+
+本工程当前使用的是经典 RTX，也就是 CMSIS-RTOS v1 接口，不是 RTX5/RTOS2。迁移时主要改动如下:
+
+| 位置 | 改动 |
+| --- | --- |
+| `chezai.uvprojx` | RTE 组件从 `CMSIS:RTOS2:Keil RTX5` 切到 `CMSIS:RTOS:Keil RTX`。 |
+| `chezai.uvprojx` | 链接库使用 `CMSIS\RTOS\RTX\LIB\ARM\RTX_CM3.lib`。 |
+| `RTE/CMSIS/RTX_Conf_CM.c` | 使用 RTX v1 配置文件，替代 RTX5 的 `RTX_Config.c` / RTOS2 兼容层配置。 |
+| `Core/main.c` | 去掉手动 `osKernelInitialize()` / `osKernelStart()` 流程。经典 RTX v1 会把 `main()` 作为线程启动。 |
+| `Core/main.c` | `main()` 初始化系统、队列和业务线程后，调用 `osThreadTerminate(osThreadGetId())` 结束自身线程。 |
+| `RTE/CMSIS/RTX_Conf_CM.c` | `OS_CLOCK` 配为 `72000000`，与 STM32F103 当前 72 MHz 系统时钟一致。 |
+| `RTE/CMSIS/RTX_Conf_CM.c` | `os_idle_demon()` 中喂独立看门狗，适配 RTX v1 的 idle hook 名称。 |
+| `RTE/CMSIS/RTX_Conf_CM.c` | 打开私有线程栈池: `OS_PRIVCNT = 4`，`OS_PRIVSTKSIZE = 768` words。 |
+
+屏幕从 RTX5 切到 RTX 后不亮的主要原因是: RTX v1 下 `osThreadDef(..., stacksize)` 只要 `stacksize` 非 0，就会走私有线程栈池。如果 `OS_PRIVCNT` / `OS_PRIVSTKSIZE` 还是 0，业务线程会创建失败，OLED 任务不会真正跑起来。现在四个业务线程都显式配置了栈，私有栈池也已经打开。
+
+当前可以从这些位置确认工程使用的是 RTX v1:
+
+| 证据 | 位置 |
+| --- | --- |
+| RTE 组件是 `CMSIS` / `RTOS` / `Keil RTX` | `chezai.uvprojx:498` |
+| RTX v1 配置文件实例是 `RTE\CMSIS\RTX_Conf_CM.c` | `chezai.uvprojx:512` - `chezai.uvprojx:514` |
+| RTE 宏是 `RTE_CMSIS_RTOS_RTX` | `RTE/_Target_1/RTE_Components.h:21` |
+| 编译依赖包含 `CMSIS\RTOS\RTX\INC\cmsis_os.h` | `Objects/main.d:10` |
+| 链接库是 `CMSIS\RTOS\RTX\LIB\ARM\RTX_CM3.lib` | `Objects/chezai.lnp:14` |
+| 链接对象包含 `rtx_conf_cm.o` | `Objects/chezai.lnp:15` |
+| `main()` 结束自身线程 | `Core/main.c:74`、`Core/main.c:87` |
+
+`RTE/CMSIS/RTX_Config.c`、`RTE/CMSIS/RTX_Config.h` 即使还在目录里，也不是当前活动构建使用的 RTX v1 配置入口；当前活动构建看 `RTX_Conf_CM.c` 和 `RTX_CM3.lib`。
+
+## 全线程栈深记录
+
+Keil 静态调用图文件是 `Objects/chezai.htm`。总的最大栈深在 `Objects/chezai.htm:8`，最大路径在 `Objects/chezai.htm:9` - `Objects/chezai.htm:10`:
+
+```text
+Maximum Stack Usage = 128 bytes + Unknown(Functions without stacksize, Cycles, Untraceable Function Pointers)
+
+Call chain for Maximum Stack Depth:
+app_key_taskEntry -> app_key_scan -> app_key_report_release -> app_key_send_event
+-> app_msg_send -> osMessagePut -> isrMessagePut -> isr_mbx_send -> rt_psq_enq
+```
+
+业务线程的静态最大栈深如下:
+
+| 线程入口 | 配置栈 | Keil 静态最大深度 | 报告位置 | 最大调用链摘要 |
+| --- | ---: | ---: | --- | --- |
+| `app_key_taskEntry` | 512 bytes | 128 bytes | `Objects/chezai.htm:716` - `Objects/chezai.htm:717` | `app_key_scan -> app_key_report_release -> app_key_send_event -> app_msg_send -> osMessagePut` |
+| `app_power_taskEntry` | 512 bytes | 96 bytes | `Objects/chezai.htm:798` - `Objects/chezai.htm:799` | `app_power_msg_handle -> app_power_enter_state -> app_power_notify_oled -> app_msg_send -> osMessagePut` |
+| `app_cd_taskEntry` | 768 bytes | 84 bytes | `Objects/chezai.htm:705` - `Objects/chezai.htm:706` | `app_cd_msg_handle -> app_cd_report_state -> osMailFree -> sysMailFree` |
+| `app_oled_taskEntry` | 768 bytes | 120 bytes | `Objects/chezai.htm:781` - `Objects/chezai.htm:782` | `app_oled_init -> app_oled_render -> bsp_oled_iic_refresh -> bsp_oled_write` |
+| `main` | `OS_MAINSTKSIZE = 128 words` | 88 bytes | `Objects/chezai.htm:952` - `Objects/chezai.htm:953` | `sys_task_init -> osThreadCreate -> svcThreadCreate -> rt_tsk_create` |
+| `osTimerThread` | `OS_TIMERSTKSZ = 128 words` | 40 bytes | `Objects/chezai.htm:1125` - `Objects/chezai.htm:1126` | `osMessageGet -> isrMessageGet -> isr_mbx_receive` |
+
+软件定时器回调不是独立业务线程，一般由 RTX timer thread 调度，但 Keil 调用图也单独列出了它们的可见最大深度:
+
+| 回调 | Keil 静态最大深度 | 报告位置 | 最大调用链摘要 |
+| --- | ---: | --- | --- |
+| `app_key_long_timer_cb` | 88 bytes | `Objects/chezai.htm:1772` - `Objects/chezai.htm:1773` | `app_key_send_event -> app_msg_send -> osMessagePut` |
+| `app_cd_disc_timer_cb` | 80 bytes | `Objects/chezai.htm:1826` - `Objects/chezai.htm:1827` | `app_cd_send_self_event -> app_msg_send -> osMessagePut` |
+| `app_cd_repeat_timer_cb` | 80 bytes | `Objects/chezai.htm:1869` - `Objects/chezai.htm:1870` | `app_cd_send_self_event -> app_msg_send -> osMessagePut` |
+| `app_oled_power_on_timer_cb` | 80 bytes | `Objects/chezai.htm:2051` - `Objects/chezai.htm:2052` | `app_oled_send_refresh_event -> app_msg_send -> osMessagePut` |
+
+注意: 这些数值是 Keil 静态分析能看到的路径。报告顶部仍然带有 `Unknown(Functions without stacksize, Cycles, Untraceable Function Pointers)`，所以后续如果新增大局部数组、递归、复杂 `printf` 或不可追踪函数指针，应重新生成 `Objects/chezai.htm` 再评估栈大小。
+
 ## 构建方法
 
 1. 安装 Keil MDK 5，并确保包含 STM32F1 设备包和 ARM Compiler 5。
