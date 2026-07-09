@@ -57,16 +57,16 @@ DebugConfig/    Keil 调试配置
 
 | 任务 | 入口函数 | 优先级 | 主要等待方式 | 职责 |
 | --- | --- | --- | --- | --- |
-| KEY | `app_key_taskEntry` | `osPriorityNormal` | `osDelay(10 ms)` | 扫描按键、消抖、产生短按/长按/释放事件 |
+| KEY | `app_key_taskEntry` | `osPriorityAboveNormal` | `osDelay(10 ms)` | 扫描按键、消抖、产生短按/长按/释放事件 |
 | Power | `app_power_taskEntry` | `osPriorityNormal` | `app_msg_get(..., osWaitForever)` | 处理上下电状态，并通知 CD/OLED |
-| CD | `app_cd_taskEntry` | `osPriorityNormal` | `app_msg_get(..., osWaitForever)` | 运行 CD 状态机，生成 OLED 显示数据 |
-| OLED | `app_oled_taskEntry` | `osPriorityNormal` | `osMailGet(..., 50 ms)` | 接收 Power/CD/OLED Mail，刷新屏幕 |
+| CD | `app_cd_taskEntry` | `osPriorityBelowNormal` | `app_msg_get(..., osWaitForever)` | 运行 CD 状态机，生成 OLED 显示数据 |
+| OLED | `app_oled_taskEntry` | `osPriorityLow` | `osMailGet(..., 50 ms)` | 接收 Power/CD/OLED Mail，刷新屏幕 |
 | RTX Timer | `osTimerThread` | High | RTX 内部消息邮箱 | 执行软件定时器回调 |
 | Idle | `os_idle_demon` | Idle | 无就绪任务时运行 | 喂独立看门狗 |
 
 ## 任务调度
 
-RTX 使用抢占式优先级调度。四个业务任务都配置为 `osPriorityNormal`，因此它们之间不会靠优先级抢占，而是通过阻塞等待、时间片和事件唤醒协同运行。
+RTX 使用抢占式优先级调度。业务任务按实时性分层: KEY 响应按键最高，Power 处理上下电状态居中，CD 状态机低于 Power，OLED 刷屏最低。
 
 当前调度配置在 `RTE/CMSIS/RTX_Conf_CM.c`:
 
@@ -77,7 +77,7 @@ RTX 使用抢占式优先级调度。四个业务任务都配置为 `osPriorityN
 ```
 
 - `OS_TICK = 1000`: 系统 tick 为 1 ms。
-- `OS_ROBIN = 1`: 同优先级任务启用 round-robin 时间片。
+- `OS_ROBIN = 1`: 同优先级任务启用 round-robin 时间片；当前业务任务优先级已分层，所以主要作为后续扩展保护。
 - `OS_ROBINTOUT = 5`: 同优先级就绪任务每 5 ms 轮转一次。
 
 实际运行时，大部分业务任务并不会一直占用 CPU:
@@ -85,6 +85,7 @@ RTX 使用抢占式优先级调度。四个业务任务都配置为 `osPriorityN
 - KEY 任务每 10 ms 扫描一次按键，然后 `osDelay()` 让出 CPU。
 - Power 和 CD 任务长期阻塞在各自的 Message Queue 上，收到消息才运行。
 - OLED 任务阻塞等待 `g_oledMailQueue`，超时周期为 50 ms。
+- OLED 任务优先级最低，I2C 刷屏和开机动画不会压住按键扫描和电源状态处理。
 - 软件定时器回调由 RTX Timer 线程执行；回调里只发送事件，不做长时间显示或复杂业务。
 - 没有业务任务就绪时进入 `os_idle_demon()`，在那里喂看门狗。
 
@@ -133,10 +134,10 @@ OLED 根据 `mail->msgId` 分流:
 线程定义集中在 `Core/main.c`:
 
 ```c
-osThreadDef(app_key_taskEntry,   osPriorityNormal, 1U, TASK_KEY_STACK_SIZE);
-osThreadDef(app_power_taskEntry, osPriorityNormal, 1U, TASK_POWER_STACK_SIZE);
-osThreadDef(app_cd_taskEntry,    osPriorityNormal, 1U, TASK_CD_STACK_SIZE);
-osThreadDef(app_oled_taskEntry,  osPriorityNormal, 1U, TASK_OLED_STACK_SIZE);
+osThreadDef(app_key_taskEntry,   TASK_KEY_PRIORITY, 1U, TASK_KEY_STACK_SIZE);
+osThreadDef(app_power_taskEntry, TASK_POWER_PRIORITY, 1U, TASK_POWER_STACK_SIZE);
+osThreadDef(app_cd_taskEntry,    TASK_CD_PRIORITY, 1U, TASK_CD_STACK_SIZE);
+osThreadDef(app_oled_taskEntry,  TASK_OLED_PRIORITY, 1U, TASK_OLED_STACK_SIZE);
 ```
 
 真正创建线程的是 `sys_task_init()`:
@@ -158,6 +159,11 @@ KEY 任务需要同时向 CD 和 Power 发消息，所以入口参数传入 `s_k
 线程栈大小定义在 `Common/com_config.h`:
 
 ```c
+#define TASK_KEY_PRIORITY           osPriorityAboveNormal
+#define TASK_POWER_PRIORITY         osPriorityNormal
+#define TASK_CD_PRIORITY            osPriorityBelowNormal
+#define TASK_OLED_PRIORITY          osPriorityLow
+
 #define TASK_KEY_STACK_SIZE         512U
 #define TASK_POWER_STACK_SIZE       512U
 #define TASK_CD_STACK_SIZE          768U

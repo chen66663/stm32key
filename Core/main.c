@@ -24,10 +24,10 @@ osMessageQDef(cdMsgQueue, QUEUE_CD_LEN, uint32_t);
 osMessageQDef(powerMsgQueue, QUEUE_POWER_LEN, uint32_t);
 osMailQDef(oledMailQueue, MAIL_OLED_LEN, OledMail);
 osPoolDef(appMsgPool, APP_MSG_POOL_LEN, AppMsg);
-osThreadDef(app_key_taskEntry, osPriorityNormal, 1U, TASK_KEY_STACK_SIZE);
-osThreadDef(app_power_taskEntry, osPriorityNormal, 1U, TASK_POWER_STACK_SIZE);
-osThreadDef(app_cd_taskEntry, osPriorityNormal, 1U, TASK_CD_STACK_SIZE);
-osThreadDef(app_oled_taskEntry, osPriorityNormal, 1U, TASK_OLED_STACK_SIZE);
+osThreadDef(app_key_taskEntry, TASK_KEY_PRIORITY, 1U, TASK_KEY_STACK_SIZE);
+osThreadDef(app_power_taskEntry, TASK_POWER_PRIORITY, 1U, TASK_POWER_STACK_SIZE);
+osThreadDef(app_cd_taskEntry, TASK_CD_PRIORITY, 1U, TASK_CD_STACK_SIZE);
+osThreadDef(app_oled_taskEntry, TASK_OLED_PRIORITY, 1U, TASK_OLED_STACK_SIZE);
 
 static uint8_t sys_queue_init(void)
 {

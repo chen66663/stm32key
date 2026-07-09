@@ -7,6 +7,11 @@
 #define QUEUE_POWER_LEN             8U
 #define MAIL_OLED_LEN               8U
 
+#define TASK_KEY_PRIORITY           osPriorityAboveNormal
+#define TASK_POWER_PRIORITY         osPriorityNormal
+#define TASK_CD_PRIORITY            osPriorityBelowNormal
+#define TASK_OLED_PRIORITY          osPriorityLow
+
 #define TASK_KEY_STACK_SIZE         512U
 #define TASK_POWER_STACK_SIZE       512U
 #define TASK_CD_STACK_SIZE          768U
