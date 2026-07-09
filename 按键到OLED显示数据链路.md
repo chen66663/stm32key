@@ -136,16 +136,16 @@ music      = 当前歌曲号
 CD 发送 Mail 的流程：
 
 ```text
-1. osMailAlloc(g_cdOledMailQueue, 0U)
+1. osMailAlloc(g_oledMailQueue, 0U)
 2. 填充 OledMail 内容
-3. osMailPut(g_cdOledMailQueue, mail)
+3. osMailPut(g_oledMailQueue, mail)
 ```
 
 数据流：
 
 ```text
 CD
-    -> g_cdOledMailQueue
+    -> g_oledMailQueue
     -> OLED
 ```
 
@@ -154,7 +154,7 @@ CD
 OLED 线程周期性检查 CD 发来的 Mail Queue。
 
 ```c
-evt = osMailGet(g_cdOledMailQueue, 0U);
+evt = osMailGet(g_oledMailQueue, timeout);
 ```
 
 收到 `OledMail` 后，OLED 更新自己的显示缓存：
@@ -234,7 +234,7 @@ KEY1 短按
     -> EV_KEY_1_SHORT 转成 MATRIX_EVENT_PLAY_PAUSE
     -> CD 状态机完成 STOP/PLAY/PAUSE 迁移
     -> CD 生成 OledMail
-    -> osMailPut(g_cdOledMailQueue, mail)
+    -> osMailPut(g_oledMailQueue, mail)
     -> OLED 线程 osMailGet()
     -> OLED 状态机进入 UPDATE
     -> app_oled_render()
@@ -252,4 +252,3 @@ KEY1 短按
     -> OLED 状态机
     -> OLED 显示
 ```
-

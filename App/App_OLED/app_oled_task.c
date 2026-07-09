@@ -1,6 +1,5 @@
 #include "app_oled_task.h"
 #include "app_oled_anim.h"
-#include "app_msg.h"
 #include "app_types.h"
 #include "bsp_oled_font.h"
 #include "bsp_oled_iic.h"
@@ -25,7 +24,6 @@ static const OledState s_oledStateMatrix[OLED_STATE_COUNT][OLED_EVENT_COUNT] =
     { OLED_STATE_ERROR, OLED_STATE_ERROR,  OLED_STATE_ERROR,  OLED_STATE_ERROR  }
 };
 
-static void app_oled_msg_handle(const AppMsg *msg);
 static void app_oled_mail_handle(const OledMail *mail);
 static void app_oled_dispatch(OledEvent event);
 static void app_oled_render(void);
@@ -67,7 +65,6 @@ err_t app_oled_init(void)
 
 void app_oled_taskEntry(void const *argument)
 {
-    AppMsg *msg;
     osEvent evt;
     OledMail *mail;
 
@@ -76,22 +73,19 @@ void app_oled_taskEntry(void const *argument)
 
     for (;;)
     {
-        msg = app_msg_get(g_oledMsgQueue, OLED_TASK_PERIOD_MS);
-        if (msg != NULL)
+        if (g_oledMailQueue != NULL)
         {
-            app_oled_msg_handle(msg);
-            app_msg_free(msg);
-        }
-
-        if (g_cdOledMailQueue != NULL)
-        {
-            evt = osMailGet(g_cdOledMailQueue, 0U);
+            evt = osMailGet(g_oledMailQueue, OLED_TASK_PERIOD_MS);
             if (evt.status == osEventMail)
             {
                 mail = (OledMail *)evt.value.p;
                 app_oled_mail_handle(mail);
-                (void)osMailFree(g_cdOledMailQueue, mail);
+                (void)osMailFree(g_oledMailQueue, mail);
             }
+        }
+        else
+        {
+            osDelay(OLED_TASK_PERIOD_MS);
         }
     }
 }
@@ -141,16 +135,16 @@ void app_oled_show_mali_brother_group(uint8_t x, uint8_t page)
     bsp_oled_iic_refresh();
 }
 
-static void app_oled_msg_handle(const AppMsg *msg)
+static void app_oled_mail_handle(const OledMail *mail)
 {
-    if (msg == NULL)
+    if (mail == NULL)
     {
         return;
     }
 
-    if (msg->msgId == MSG_ID_POWER_STATE)
+    if (mail->msgId == MSG_ID_POWER_STATE)
     {
-        s_powerState = (SysPower)msg->value;
+        s_powerState = mail->powerState;
         if (s_powerState == SYS_POWER_OFF)
         {
             s_cdState = SYS_STATE_POWER_OFF;
@@ -173,7 +167,19 @@ static void app_oled_msg_handle(const AppMsg *msg)
         app_oled_dispatch((s_powerState == SYS_POWER_ON) ? OLED_EVENT_POWER_ON : OLED_EVENT_POWER_OFF);
         app_oled_render();
     }
-    else if (msg->msgId == MSG_ID_OLED_REFRESH)
+    else if (mail->msgId == MSG_ID_CD_STATE)
+    {
+        s_cdState = mail->cdState;
+        s_cdDisplay = mail->cdDisplay;
+        if ((mail->music >= CD_MUSIC_MIN) && (mail->music <= CD_MUSIC_MAX))
+        {
+            s_music = mail->music;
+        }
+
+        app_oled_dispatch(OLED_EVENT_CD_UPDATE);
+        app_oled_render();
+    }
+    else if (mail->msgId == MSG_ID_OLED_REFRESH)
     {
         if (s_powerState == SYS_POWER_ON)
         {
@@ -182,24 +188,6 @@ static void app_oled_msg_handle(const AppMsg *msg)
         app_oled_dispatch(OLED_EVENT_REFRESH);
         app_oled_render();
     }
-}
-
-static void app_oled_mail_handle(const OledMail *mail)
-{
-    if ((mail == NULL) || (mail->msgId != MSG_ID_CD_STATE))
-    {
-        return;
-    }
-
-    s_cdState = mail->cdState;
-    s_cdDisplay = mail->cdDisplay;
-    if ((mail->music >= CD_MUSIC_MIN) && (mail->music <= CD_MUSIC_MAX))
-    {
-        s_music = mail->music;
-    }
-
-    app_oled_dispatch(OLED_EVENT_CD_UPDATE);
-    app_oled_render();
 }
 
 static void app_oled_dispatch(OledEvent event)
@@ -220,17 +208,31 @@ static void app_oled_power_on_timer_cb(void const *argument)
 
 static void app_oled_send_refresh_event(void)
 {
-    AppMsg msg;
+    OledMail *mail;
 
-    msg.srcModule = MODULE_OLED;
-    msg.dstModule = MODULE_OLED;
-    msg.msgId = MSG_ID_OLED_REFRESH;
-    msg.opt0 = 0U;
-    msg.opt1 = 0U;
-    msg.opt2 = 0U;
-    msg.value = 0U;
+    if (g_oledMailQueue == NULL)
+    {
+        return;
+    }
 
-    (void)app_msg_send(g_oledMsgQueue, &msg);
+    mail = (OledMail *)osMailAlloc(g_oledMailQueue, 0U);
+    if (mail == NULL)
+    {
+        return;
+    }
+
+    mail->srcModule = MODULE_OLED;
+    mail->dstModule = MODULE_OLED;
+    mail->msgId = MSG_ID_OLED_REFRESH;
+    mail->powerState = s_powerState;
+    mail->cdState = s_cdState;
+    mail->cdDisplay = s_cdDisplay;
+    mail->music = s_music;
+
+    if (osMailPut(g_oledMailQueue, mail) != osOK)
+    {
+        (void)osMailFree(g_oledMailQueue, mail);
+    }
 }
 
 static void app_oled_render(void)

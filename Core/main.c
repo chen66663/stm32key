@@ -14,17 +14,15 @@
 #include "com_type.h"
 
 osMessageQId g_cdMsgQueue = NULL;
-osMessageQId g_oledMsgQueue = NULL;
 osMessageQId g_powerMsgQueue = NULL;
-osMailQId g_cdOledMailQueue = NULL;
+osMailQId g_oledMailQueue = NULL;
 osPoolId g_appMsgPool = NULL;
 
 static osMessageQId s_keyQueues[2];
 
 osMessageQDef(cdMsgQueue, QUEUE_CD_LEN, uint32_t);
-osMessageQDef(oledMsgQueue, QUEUE_OLED_LEN, uint32_t);
 osMessageQDef(powerMsgQueue, QUEUE_POWER_LEN, uint32_t);
-osMailQDef(cdOledMailQueue, MAIL_CD_OLED_LEN, OledMail);
+osMailQDef(oledMailQueue, MAIL_OLED_LEN, OledMail);
 osPoolDef(appMsgPool, APP_MSG_POOL_LEN, AppMsg);
 osThreadDef(app_key_taskEntry, osPriorityNormal, 1U, TASK_KEY_STACK_SIZE);
 osThreadDef(app_power_taskEntry, osPriorityNormal, 1U, TASK_POWER_STACK_SIZE);
@@ -35,15 +33,13 @@ static uint8_t sys_queue_init(void)
 {
     g_appMsgPool = osPoolCreate(osPool(appMsgPool));
     g_cdMsgQueue = osMessageCreate(osMessageQ(cdMsgQueue), NULL);
-    g_oledMsgQueue = osMessageCreate(osMessageQ(oledMsgQueue), NULL);
     g_powerMsgQueue = osMessageCreate(osMessageQ(powerMsgQueue), NULL);
-    g_cdOledMailQueue = osMailCreate(osMailQ(cdOledMailQueue), NULL);
+    g_oledMailQueue = osMailCreate(osMailQ(oledMailQueue), NULL);
 
     return ((g_appMsgPool != NULL) &&
             (g_cdMsgQueue != NULL) &&
-            (g_oledMsgQueue != NULL) &&
             (g_powerMsgQueue != NULL) &&
-            (g_cdOledMailQueue != NULL)) ? TRUE : FALSE;
+            (g_oledMailQueue != NULL)) ? TRUE : FALSE;
 }
 
 static uint8_t sys_task_init(void)

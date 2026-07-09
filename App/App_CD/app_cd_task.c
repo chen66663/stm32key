@@ -239,7 +239,7 @@ static void app_cd_report_state(void)
     MatrixEvent repeatEvent;
     uint8_t cdDisplay;
 
-    if (g_cdOledMailQueue == NULL)
+    if (g_oledMailQueue == NULL)
     {
         return;
     }
@@ -268,7 +268,7 @@ static void app_cd_report_state(void)
         return;
     }
 
-    mail = (OledMail *)osMailAlloc(g_cdOledMailQueue, 0U);
+    mail = (OledMail *)osMailAlloc(g_oledMailQueue, 0U);
     if (mail == NULL)
     {
         return;
@@ -282,9 +282,9 @@ static void app_cd_report_state(void)
     mail->cdDisplay = cdDisplay;
     mail->music = music;
 
-    if (osMailPut(g_cdOledMailQueue, mail) != osOK)
+    if (osMailPut(g_oledMailQueue, mail) != osOK)
     {
-        (void)osMailFree(g_cdOledMailQueue, mail);
+        (void)osMailFree(g_oledMailQueue, mail);
         return;
     }
 

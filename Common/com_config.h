@@ -5,8 +5,7 @@
 
 #define QUEUE_CD_LEN                8U
 #define QUEUE_POWER_LEN             8U
-#define QUEUE_OLED_LEN              8U
-#define MAIL_CD_OLED_LEN            8U
+#define MAIL_OLED_LEN               8U
 
 #define TASK_KEY_STACK_SIZE         512U
 #define TASK_POWER_STACK_SIZE       512U

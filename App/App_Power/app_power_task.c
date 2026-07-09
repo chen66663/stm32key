@@ -125,15 +125,29 @@ static void app_power_notify_cd(SysPower powerState)
 
 static void app_power_notify_oled(SysPower powerState)
 {
-    AppMsg msg;
+    OledMail *mail;
 
-    msg.srcModule = MODULE_POWER;
-    msg.dstModule = MODULE_OLED;
-    msg.msgId = MSG_ID_POWER_STATE;
-    msg.opt0 = 0U;
-    msg.opt1 = 0U;
-    msg.opt2 = 0U;
-    msg.value = (uint16_t)powerState;
+    if (g_oledMailQueue == NULL)
+    {
+        return;
+    }
 
-    (void)app_msg_send(g_oledMsgQueue, &msg);
+    mail = (OledMail *)osMailAlloc(g_oledMailQueue, 0U);
+    if (mail == NULL)
+    {
+        return;
+    }
+
+    mail->srcModule = MODULE_POWER;
+    mail->dstModule = MODULE_OLED;
+    mail->msgId = MSG_ID_POWER_STATE;
+    mail->powerState = powerState;
+    mail->cdState = SYS_STATE_POWER_OFF;
+    mail->cdDisplay = (uint8_t)OLED_CD_DISPLAY_NORMAL;
+    mail->music = CD_MUSIC_MIN;
+
+    if (osMailPut(g_oledMailQueue, mail) != osOK)
+    {
+        (void)osMailFree(g_oledMailQueue, mail);
+    }
 }
