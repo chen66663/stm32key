@@ -7,6 +7,7 @@
 
 static MatrixEvent app_cd_key_to_event(KeyEvent keyEvent);
 static MatrixEvent app_cd_msg_to_event(const AppMsg *msg);
+static uint8_t app_cd_should_ignore_key(KeyEvent keyEvent);
 static void app_cd_msg_handle(const AppMsg *msg);
 static void app_cd_repeat_release_handle(const AppMsg *msg);
 static void app_cd_report_state(void);
@@ -84,6 +85,8 @@ static MatrixEvent app_cd_key_to_event(KeyEvent keyEvent)
 
 static MatrixEvent app_cd_msg_to_event(const AppMsg *msg)
 {
+    KeyEvent keyEvent;
+
     if (msg == NULL)
     {
         return MATRIX_EVENT_NONE;
@@ -96,7 +99,12 @@ static MatrixEvent app_cd_msg_to_event(const AppMsg *msg)
 
     if (msg->msgId == MSG_ID_KEY_EVENT)
     {
-        return app_cd_key_to_event((KeyEvent)msg->value);
+        keyEvent = (KeyEvent)msg->value;
+        if (app_cd_should_ignore_key(keyEvent) != 0U)
+        {
+            return MATRIX_EVENT_NONE;
+        }
+        return app_cd_key_to_event(keyEvent);
     }
 
     if (msg->msgId == MSG_ID_CD_EVENT)
@@ -113,6 +121,20 @@ static MatrixEvent app_cd_msg_to_event(const AppMsg *msg)
     }
 
     return MATRIX_EVENT_NONE;
+}
+
+static uint8_t app_cd_should_ignore_key(KeyEvent keyEvent)
+{
+    SysState state = app_cd_fsm_get_state();
+
+    if ((state != SYS_STATE_LOADING) && (state != SYS_STATE_EJECTING))
+    {
+        return 0U;
+    }
+
+    return ((keyEvent == EV_KEY_0_SHORT) ||
+            (keyEvent == EV_KEY_0_LONG) ||
+            (keyEvent == EV_KEY_0_OFF)) ? 1U : 0U;
 }
 
 static void app_cd_msg_handle(const AppMsg *msg)
