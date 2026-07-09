@@ -134,7 +134,30 @@ KEY 任务栈里主要会放这些内容:
 - `s_keyEventMsgTable`、`s_shortEvent`、`s_longEvent`、`s_offEvent`: `static const` 表，放在只读/静态存储区。
 - 发出去的 `AppMsg`: 由 `app_msg_send` 从 `g_appMsgPool` 申请，消息内容进入全局消息池，不压在 KEY 任务栈上。
 
-所以 KEY 任务的实际栈压力比较小: 它没有大数组、没有递归、没有格式化打印，主要是按键扫描和 RTOS API 调用。`512 bytes` 比 RTX 默认线程栈 `OS_STKSIZE = 50 words = 200 bytes` 更宽裕，能覆盖按键扫描函数、消息发送函数、定时器/队列 API 的调用层级，并保留调试余量。
+所以 KEY 任务的实际栈压力比较小: 它没有大数组、没有递归、没有格式化打印，主要是按键扫描和 RTOS API 调用。
+
+Keil 已生成静态调用图文件 `Objects/chezai.htm`，其中给出的最大栈深如下:
+
+```text
+Maximum Stack Usage = 128 bytes + Unknown(Functions without stacksize, Cycles, Untraceable Function Pointers)
+
+Call chain for Maximum Stack Depth:
+app_key_taskEntry -> app_key_scan -> app_key_report_release -> app_key_send_event
+-> app_msg_send -> osMessagePut -> isrMessagePut -> isr_mbx_send -> rt_psq_enq
+```
+
+跟 KEY 模块相关的函数栈深如下，其中 `app_key_long_timer_cb` 是 RTX 软件定时器回调，不在 `app_key_taskEntry` 主循环路径里:
+
+| 函数 | Keil 报告的自身栈 | Keil 报告的最大调用深度 |
+| --- | ---: | ---: |
+| `app_key_taskEntry` | 0 bytes | 128 bytes |
+| `app_key_scan` | 40 bytes | 128 bytes |
+| `app_key_report_release` | 16 bytes | 88 bytes |
+| `app_key_send_event` | 16 bytes | 72 bytes |
+| `app_msg_send` | 16 bytes | 56 bytes |
+| `app_key_long_timer_cb` | 16 bytes | 88 bytes |
+
+因此，`TASK_KEY_STACK_SIZE = 512U` 的依据是: Keil 静态调用图报告 `app_key_taskEntry` 当前最大栈深为 128 bytes，而实际分配 512 bytes，余量为 `512 - 128 = 384 bytes`，也就是 4 倍于当前最大静态栈深。这个余量用于覆盖调试编译差异、RTX 内部未知栈信息以及后续少量代码调整。
 
 RTX 配置在 `RTE/CMSIS/RTX_Conf_CM.c`，关键项如下:
 
