@@ -86,7 +86,7 @@ osThreadCreate(osThread(app_oled_taskEntry), NULL);
 
 `osThreadCreate(osThread(name), argument)` 中，`osThread(name)` 取出前面 `osThreadDef` 生成的线程描述符，`argument` 会传给入口函数的 `argument` 参数。按键任务需要同时向 CD 队列和电源队列发送消息，所以传入 `s_keyQueues`；电源、CD、OLED 任务使用全局队列句柄，不需要额外入口参数，所以传 `NULL`。
 
-## 线程栈大小依据
+## KEY 任务栈大小依据
 
 线程栈大小集中定义在 `Common/com_config.h`:
 
@@ -97,14 +97,44 @@ osThreadCreate(osThread(app_oled_taskEntry), NULL);
 #define TASK_OLED_STACK_SIZE        768U
 ```
 
-这些值的选择依据来自两部分: 任务本身的复杂度，以及 RTX 栈池配置。
+这里重点说明 `app_key_taskEntry` 为什么是 `512U`。
 
-| 任务 | 入口函数 | 栈大小 | 选择依据 |
-| --- | --- | ---: | --- |
-| KEY | `app_key_taskEntry` | 512 bytes | 按键任务主要做 GPIO 采样、消抖、长按定时和消息发送，局部变量少，典型局部数组只有 `rawState[BSP_KEY_COUNT]`，因此使用 512 bytes。 |
-| POWER | `app_power_taskEntry` | 512 bytes | 电源任务只处理消息、查询状态矩阵、向 CD/OLED 发电源状态，调用链短、局部变量少，因此使用 512 bytes。 |
-| CD | `app_cd_taskEntry` | 768 bytes | CD 任务包含状态机分发、两个软件定时器、状态上报和 `OledMail` 分配，逻辑比 KEY/POWER 深，因此提高到 768 bytes。 |
-| OLED | `app_oled_taskEntry` | 768 bytes | OLED 任务要处理消息和 Mail 队列，执行渲染、字符串居中、曲目文本生成、I2C 刷屏和开机动画调用，调用链更深，因此使用 768 bytes。 |
+```c
+void app_key_taskEntry(void const *argument)
+{
+    const osMessageQId *queues = (const osMessageQId *)argument;
+
+    ...
+
+    for (;;)
+    {
+        app_key_scan();
+        osDelay(KEY_SCAN_INTERVAL_MS);
+    }
+}
+```
+
+`TASK_KEY_STACK_SIZE = 512U` 表示给 KEY 任务分配 512 bytes 私有栈。这个栈不是用来保存整个按键模块的全部状态，而是保存这个线程运行过程中临时产生的内容。
+
+KEY 任务栈里主要会放这些内容:
+
+| 来源 | 栈上内容 | 大小特点 |
+| --- | --- | --- |
+| `app_key_taskEntry` | `queues` 指针，以及调用 `osTimerCreate`、`bsp_key_init`、`app_key_scan`、`osDelay` 时的返回地址和寄存器保存 | 局部变量很少，主要是调用开销 |
+| `app_key_scan` | `rawState[BSP_KEY_COUNT]`、`wkupDown`、`key0Down`、`key1Down`、`keyIndex`、`track`，释放按键时还有 `longReported`、`holdTimeMs` | `BSP_KEY_COUNT = 3`，局部数组只有 3 个字节，其他多为 1 字节变量和指针 |
+| `app_key_report_release` | 参数和少量分支调用开销 | 不创建大数组 |
+| `app_key_send_event` | `targetQueue` 指针，以及调用 `app_msg_send` 的开销 | 不复制大块数据 |
+| `app_msg_send` | `copy` 指针，以及 `osPoolAlloc`、`osMessagePut` 调用开销 | 真正的 `AppMsg` 从全局消息池 `g_appMsgPool` 分配，不放在 KEY 任务栈里 |
+
+下面这些内容不占 `TASK_KEY_STACK_SIZE`:
+
+- `s_keyTrack[BSP_KEY_COUNT]`: `static` 变量，放在静态存储区，用来记录每个按键的消抖、确认、长按和按下时间。
+- `s_suppressed[BSP_KEY_COUNT]`: `static` 变量，放在静态存储区，用来屏蔽组合键冲突。
+- `s_cdQueue`、`s_powerQueue`、`s_longTimer[BSP_KEY_COUNT]`: `static` 变量，放在静态存储区，保存队列和定时器句柄。
+- `s_keyEventMsgTable`、`s_shortEvent`、`s_longEvent`、`s_offEvent`: `static const` 表，放在只读/静态存储区。
+- 发出去的 `AppMsg`: 由 `app_msg_send` 从 `g_appMsgPool` 申请，消息内容进入全局消息池，不压在 KEY 任务栈上。
+
+所以 KEY 任务的实际栈压力比较小: 它没有大数组、没有递归、没有格式化打印，主要是按键扫描和 RTOS API 调用。`512 bytes` 比 RTX 默认线程栈 `OS_STKSIZE = 50 words = 200 bytes` 更宽裕，能覆盖按键扫描函数、消息发送函数、定时器/队列 API 的调用层级，并保留调试余量。
 
 RTX 配置在 `RTE/CMSIS/RTX_Conf_CM.c`，关键项如下:
 
@@ -123,9 +153,7 @@ RTX 配置在 `RTE/CMSIS/RTX_Conf_CM.c`，关键项如下:
 - `OS_PRIVCNT = 4`: 使用自定义栈大小的线程数量。本工程正好有 4 个 `osThreadDef(..., TASK_xxx_STACK_SIZE)`，所以配置为 4。
 - `OS_PRIVSTKSIZE = 768`: 自定义线程栈池总大小。配置注释说明这是 word 单位，因此是 `768 * 4 = 3072 bytes`。
 - 本工程四个线程实际申请的栈总量是 `512 + 512 + 768 + 768 = 2560 bytes`，换算为 `640 words`，小于 `OS_PRIVSTKSIZE` 的 `768 words`，还剩 `128 words = 512 bytes` 余量。
-- `OS_STKCHECK = 1`: RTX 在线程切换时启用栈溢出检查。后续如果新增较大的局部数组、递归调用、复杂格式化输出或更深的 OLED 绘图调用，应优先增大对应 `TASK_xxx_STACK_SIZE`，并同步确认 `OS_PRIVSTKSIZE` 足够。
-
-因此，`TASK_OLED_STACK_SIZE = 768U` 的意思是 OLED 线程私有栈为 768 bytes；它比 KEY/POWER 的 512 bytes 大，是因为 OLED 任务的渲染和驱动调用链更深，同时它又能被当前 RTX 私有栈池 `3072 bytes` 覆盖。
+- `OS_STKCHECK = 1`: RTX 在线程切换时启用栈溢出检查。后续如果在 KEY 任务里新增较大的局部数组、递归调用或复杂打印，应重新评估 `TASK_KEY_STACK_SIZE`。
 
 ## 构建方法
 
